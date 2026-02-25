@@ -1,0 +1,306 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #000;
+            overflow: hidden;
+            margin: 0;
+            height: 100vh;
+        }
+        /* 全画面画像 */
+        #mainPreview {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* 画面に収まるように表示 */
+            object-position: center;
+            z-index: 1; /* 背景より手前に */
+        }
+        
+        /* 設定パネル */
+        #controlPanel {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+            transition: opacity 0.3s;
+        }
+
+
+        /* 実行中などはパネルを非表示 */
+        .hidden-panel {
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+    </style>
+</head>
+<body class="stopped">
+
+
+    <!-- デフォルト画像表示用 -->
+    <img id="mainPreview" src="" alt="Preview Image">
+
+
+    <!-- 設定パネル -->
+    <div id="controlPanel" class="glass-panel w-full max-w-lg bg-white/90 backdrop-blur rounded-2xl p-8 border border-gray-100 hidden-panel">
+        <div class="text-center mb-6">
+            <h1 class="text-2xl font-bold text-gray-800">Tool Settings</h1>
+            <p class="text-xs text-gray-500">Escキーで設定を表示/非表示</p>
+        </div>
+
+
+        <div class="space-y-4">
+            <!-- 画像データを入れる場所 -->
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">画像データ (Base64)</label>
+                <textarea id="targetUrlInput" rows="2" oninput="updateImageFromInput()"
+                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500 text-[10px] font-mono"
+                    placeholder="data:image/..."></textarea>
+            </div>
+
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-700 mb-1">間隔 (ms)</label>
+                    <input type="number" id="intervalTime" value="100" min="50"
+                        class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none">
+                    <p class="text-[10px] text-gray-400 mt-1">100 = 0.1秒</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-700 mb-1">回数 (0=無限)</label>
+                    <input type="number" id="maxCount" value="0" min="0"
+                        class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none">
+                </div>
+            </div>
+
+
+            <div class="flex gap-2 mt-4">
+                <button onclick="startOpening()"
+                    class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition">
+                    開始
+                </button>
+                <button onclick="stopOpening()"
+                    class="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded transition">
+                    停止
+                </button>
+            </div>
+            
+            <div class="text-center mt-2">
+                <span id="statusText" class="text-xs text-gray-500">待機中</span>
+                <span class="text-xs text-gray-400"> | Count: <span id="counter">0</span></span>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // 画像データ (Base64)
+        let targetImage = "data:image/jpeg;base64,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";
+
+
+        let timer = null;
+        let count = 0;
+        let isRunning = false;
+
+
+        // UI初期化
+        document.getElementById('targetUrlInput').value = targetImage;
+        const mainPreview = document.getElementById('mainPreview');
+
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === "Escape") {
+                if (isRunning) {
+                    stopOpening();
+                }
+                togglePanel();
+            }
+        });
+
+
+        // ページ読み込み完了時
+        window.addEventListener('load', function() {
+            // ここで確実に画像をセット
+            if (targetImage) {
+                mainPreview.src = targetImage;
+            }
+            
+            // 最初はパネルを隠す
+            document.getElementById('controlPanel').classList.add('hidden-panel');
+            
+            // 自動開始
+            setTimeout(startOpening, 100); 
+        });
+
+
+        function togglePanel() {
+            const panel = document.getElementById('controlPanel');
+            panel.classList.toggle('hidden-panel');
+        }
+
+
+        function updateImageFromInput() {
+            const inputVal = document.getElementById('targetUrlInput').value;
+            if (inputVal.trim()) {
+                targetImage = inputVal;
+                updatePreview();
+            }
+        }
+
+
+        function updatePreview() {
+            if (targetImage) {
+                mainPreview.src = targetImage;
+            }
+        }
+
+
+        function startOpening() {
+            if (isRunning) return;
+            
+            const interval = parseInt(document.getElementById('intervalTime').value) || 500;
+            const max = parseInt(document.getElementById('maxCount').value) || 0;
+
+
+            if (!targetImage.trim()) {
+                alert("画像データがありません");
+                togglePanel();
+                return;
+            }
+
+
+            isRunning = true;
+            count = 0;
+            updateUI(true);
+            setStatus("実行中...", "text-red-600");
+
+
+            openWindow(targetImage);
+
+
+            timer = setInterval(() => {
+                if (max > 0 && count >= max) {
+                    stopOpening();
+                    return;
+                }
+                openWindow(targetImage);
+            }, interval);
+        }
+
+
+        // Base64からBlobを作成するヘルパー関数
+        function dataURItoBlob(dataURI) {
+            try {
+                // Base64部分を取り出し
+                const byteString = atob(dataURI.split(',')[1]);
+                const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+                const ab = new ArrayBuffer(byteString.length);
+                const ia = new Uint8Array(ab);
+                for (let i = 0; i < byteString.length; i++) {
+                    ia[i] = byteString.charCodeAt(i);
+                }
+                return new Blob([ab], {type: mimeString});
+            } catch (e) {
+                console.error("Blob変換エラー:", e);
+                return null;
+            }
+        }
+
+
+        function openWindow(url) {
+            const w = Math.floor(Math.random() * 400) + 300;
+            const h = Math.floor(Math.random() * 300) + 200;
+            
+            const screenW = window.screen.availWidth || window.screen.width;
+            const screenH = window.screen.availHeight || window.screen.height;
+
+
+            const left = Math.floor(Math.random() * (screenW - w));
+            const top = Math.floor(Math.random() * (screenH - h));
+            
+            let newWin = null;
+
+
+            // data: URIの場合、Blob URLに変換して開く (about:blank回避 & 画像表示の確実性向上)
+            if (url.trim().startsWith('data:')) {
+                const blob = dataURItoBlob(url);
+                if (blob) {
+                    const blobUrl = URL.createObjectURL(blob);
+                    // Blob URLでウィンドウを開く
+                    newWin = window.open(blobUrl, '_blank', `width=${w},height=${h},left=${left},top=${top}`);
+                    
+                    // ※Blob URLは自動的に画像をレンダリングするため、document.writeは不要
+                    // ただし、もし開かなかった場合は後でRevokeする必要があるが、
+                    // ここでは開きっぱなしにするためRevokeはウィンドウが閉じた後が理想。
+                    // 簡易的に一定時間後にRevokeする方法もあるが、表示されなくなるリスクがあるため維持。
+                } else {
+                    // Blob変換失敗時のフォールバック（従来の方法）
+                    newWin = window.open("", '_blank', `width=${w},height=${h},left=${left},top=${top}`);
+                    if (newWin) {
+                        newWin.document.write(`<img src="${url}" style="width:100%;height:100%;object-fit:contain;">`);
+                    }
+                }
+            } else {
+                newWin = window.open(url, '_blank', `width=${w},height=${h},left=${left},top=${top}`);
+            }
+
+
+            if (newWin) {
+                count++;
+                document.getElementById('counter').innerText = count;
+                const statusEl = document.getElementById('statusText');
+                if (statusEl.innerText.includes("ブロック")) {
+                    setStatus("実行中...", "text-red-600");
+                }
+            } else {
+                setStatus("ブロックされています(許可待ち)", "text-yellow-600");
+            }
+        }
+
+
+        function stopOpening() {
+            if (timer) {
+                clearInterval(timer);
+                timer = null;
+            }
+            isRunning = false;
+            updateUI(false);
+            
+            const currentStatus = document.getElementById('statusText').innerText;
+            if (!currentStatus.includes("停止")) {
+                setStatus("停止しました", "text-gray-500");
+            }
+            document.getElementById('controlPanel').classList.remove('hidden-panel');
+        }
+
+
+        function setStatus(text, colorClass) {
+            const el = document.getElementById('statusText');
+            el.innerText = text;
+            el.className = colorClass;
+        }
+
+
+        function updateUI(running) {
+            const body = document.body;
+            if (running) {
+                body.classList.remove('stopped');
+                body.classList.add('running');
+                document.getElementById('controlPanel').classList.add('hidden-panel');
+            } else {
+                body.classList.remove('running');
+                body.classList.add('stopped');
+            }
+        }
+    </script>
+</body>
+</html>
